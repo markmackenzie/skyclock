@@ -105,7 +105,7 @@ button{cursor:pointer}
   </div>
 </div>
 <div id="clock-sticky">
-<div style="position:absolute;bottom:2px;right:8px;font-size:8px;opacity:0.3;color:#fff;z-index:5;pointer-events:none;font-family:monospace">build 20260720205321</div><canvas id="c"></canvas>
+<canvas id="c"></canvas>
 </div>
 <div id="scroll-content" style="width:100%;max-width:480px;overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:10px;padding:0 12px;margin:0 auto">
 <div id="status"></div>
@@ -1881,7 +1881,7 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
     const [sx,sy,_sunAlt]=sunXY(DX,DY,DW,DH,loc);
     _astroPositions = []; // reset each frame
     _sunScreenPos = (sx>=0) ? {x:sx,y:sy} : null; // always current for hbird
-    if(sx>=0){ _astroPositions.push({name:'sun',x:sx,y:sy,r:25});
+    if(sx>=0){ _astroPositions.push({name:'sun',x:sx,y:sy,r:25,lr:12});
       // Fade the sun's own brightness as it sinks from the horizon (alt=0)
       // down to our -15deg visibility cutoff, so it dissolves smoothly into
       // the horizon haze instead of staying full-bright until it vanishes.
@@ -1930,7 +1930,7 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
 
     // Saturn (drawn first = bottom of stack)
     {const [stx,sty]=saturnXY(DX,DY,DW,DH,loc);if(stx>=0){
-      _astroPositions.push({name:'saturn',x:stx,y:sty,r:22});
+      _astroPositions.push({name:'saturn',x:stx,y:sty,r:22,lr:8}); // ring outer=r*2.6=7.8
       const _sHaFrac=Math.max(0,Math.min(1,(stx-DX-0.06*DW)/(0.88*DW)));
       _drawWithSunOcclusion(()=>drawSaturn(ctx,stx,sty,_isNight,(()=>{
         const _srd=calcSaturnRADec();
@@ -1949,7 +1949,7 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
     ['pluto','neptune','uranus','jupiter','ceres','mars','mercury','venus'].forEach(p=>{
       const [px2,py2]=planetXY(p,DX,DY,DW,DH,loc);
       if(px2>=0){
-        _astroPositions.push({name:p,x:px2,y:py2,r:p==='jupiter'?20:p==='uranus'||p==='neptune'?10:p==='ceres'||p==='pluto'?7:14});
+        _astroPositions.push({name:p,x:px2,y:py2,r:p==='jupiter'?20:p==='uranus'||p==='neptune'?10:p==='ceres'||p==='pluto'?7:14,lr:p==='jupiter'?6:p==='venus'?5:p==='mars'?4:p==='mercury'?3:p==='uranus'?3:p==='neptune'?3:p==='ceres'||p==='pluto'?2:3});
         if(p==='mercury') drawMercury(ctx,px2,py2,_isNight);
         else if(p==='venus')   drawVenus(ctx,px2,py2,_isNight);
         else if(p==='mars'){
@@ -2006,7 +2006,7 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
           return [testX,testY];
         })();
 
-    if(mx2>=0 && _astroAlpha>0){ _astroPositions.push({name:'moon',x:mx2,y:my2,r:22});
+    if(mx2>=0 && _astroAlpha>0){ _astroPositions.push({name:'moon',x:mx2,y:my2,r:22,lr:12});
       // Earthshine: peaks at new moon, fades within 2 days of quarter
       const distFromNew=Math.min(phase,1-phase);
       const distFromQuarter=Math.abs(distFromNew-0.125);
@@ -2063,13 +2063,15 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
       const skyB=Math.round(tb+(bb-tb)*skyT);
 
       // Halo
-      if(!isDayMoon&&halo>0){
+      // Halo: only within ~2 days of full moon (fullness > 0.7), tight and faint
+      const haloStr=Math.max(0,fullness-0.7)/0.3; // 0 at fullness=0.7, 1 at fullness=1.0
+      if(!isDayMoon&&haloStr>0){
         ctx.save();
-        ctx.globalAlpha=halo*0.22*_astroAlpha;
-        const gM=ctx.createRadialGradient(mx2,my2,mr*0.5,mx2,my2,mr*3);
+        ctx.globalAlpha=haloStr*0.25*_astroAlpha;
+        const gM=ctx.createRadialGradient(mx2,my2,mr*0.9,mx2,my2,mr*1.5);
         gM.addColorStop(0,"rgba(220,230,255,1)");
         gM.addColorStop(1,"rgba(220,230,255,0)");
-        ctx.fillStyle=gM;ctx.beginPath();ctx.arc(mx2,my2,mr*2,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle=gM;ctx.beginPath();ctx.arc(mx2,my2,mr*1.5,0,Math.PI*2);ctx.fill();
         ctx.restore();
       }
 
@@ -2112,7 +2114,7 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
           data[ii]=Math.min(255,skyR+8);
           data[ii+1]=Math.min(255,skyG+8);
           data[ii+2]=Math.min(255,skyB+15);
-          data[ii+3]=Math.round(180*ef);
+          data[ii+3]=Math.round(60*ef); // subtle: occlude stars but invisible to eye
         }
       }
       ot.putImageData(id,0,0);
@@ -2132,20 +2134,55 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
       // nx,ny are disc-normalized coords; ny>0=north(up), nx<0=west(left in sky view).
       // This produces the "man in the moon" face recognizable to the naked eye.
       const _maria=[
-        // [lat_deg, lon_deg, radius_deg, darkness(0=black,1=highland)]
-        // Western hemisphere - Oceanus Procellarum dominates left side
-        [- 5,-45,44,0.42], // Oceanus Procellarum
-        [ 32,-18,28,0.40], // Mare Imbrium (upper-left "eye")
-        [-21,-14,16,0.50], // Mare Nubium
-        [-24,-38,12,0.48], // Mare Humorum
-        // Eastern hemisphere
-        [ 28, 18,16,0.45], // Mare Serenitatis (upper-right)
-        [ 13,  3, 8,0.52], // Mare Vaporum (center bridge)
-        [  8, 28,18,0.47], // Mare Tranquillitatis
-        [ 17, 59,11,0.50], // Mare Crisium (distinct far-right oval)
-        [- 4, 52,16,0.50], // Mare Fecunditatis
-        [-15, 35,10,0.52], // Mare Nectaris
-        [ 57,  0,12,0.55], // Mare Frigoris (north polar)
+        // [lat_deg, lon_deg, radius_deg, darkness(0=darkest,1=highland)]
+        // Based on careful study of full-moon reference image
+        //
+        // WESTERN HEMISPHERE
+        // Oceanus Procellarum — vast irregular dark ocean, left side
+        [-10,-50,20,0.38], // SW Procellarum core
+        [  5,-43,22,0.40], // Central Procellarum
+        [ 18,-36,18,0.42], // N Procellarum (connects to Imbrium)
+        [-28,-42,14,0.44], // S Procellarum extension
+        // Mare Imbrium — large dark circular basin, upper left
+        [ 33,-17,26,0.35], // Imbrium core (very dark)
+        [ 33,-17,18,0.30], // Imbrium darkest center
+        // Mare Humorum — medium dark oval, lower left
+        [-24,-39,11,0.40],
+        // Mare Nubium — diffuse, lower center-left
+        [-20,-16,16,0.48],
+        [-14,-10,10,0.50],
+        // Sinus Aestuum — small, between Imbrium and Vaporum
+        [ 12,-10, 8,0.52],
+        //
+        // CENTRAL / BRIDGING
+        // Mare Vaporum — small dark patch, center
+        [ 14,  3, 7,0.46],
+        // Sinus Medii — tiny, dead center of disk
+        [  2,  1, 5,0.54],
+        //
+        // EASTERN HEMISPHERE
+        // Mare Serenitatis — dark oval, upper right of center
+        [ 28, 17,17,0.38],
+        [ 26, 18,10,0.34], // darker core
+        // Mare Tranquillitatis — large irregular, right of center
+        [  8, 30,19,0.43],
+        [  5, 24,10,0.46],
+        // Mare Fecunditatis — large, lower right
+        [ -4, 51,18,0.46],
+        [ -6, 47,10,0.44],
+        // Mare Crisium — distinct isolated oval, far right
+        [ 17, 59,10,0.36], // very dark, compact
+        // Mare Nectaris — small, lower right
+        [-15, 34, 9,0.46],
+        // Mare Marginis — extreme right edge
+        [ 13, 86, 6,0.52],
+        // Lacus Somniorum — upper right, diffuse dark patch
+        [ 38, 29,10,0.54],
+        // Mare Frigoris — thin dark band near north pole
+        [ 56, -5,18,0.50],
+        [ 58, 25,12,0.52],
+        // Sinus Iridum — bay in Imbrium NW
+        [ 45,-31, 9,0.45],
       ];
       function _mariaDarkness(nx,ny){
         const sinLat=Math.max(-1,Math.min(1,ny));
@@ -2204,7 +2241,7 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
         }
 
         const finalAlpha=Math.round(255*limbAlpha*termAlpha);
-        const ld=1-0.45*Math.pow(r2/(_physMr*_physMr),1.5); // limb darkening
+        const ld=1-0.55*Math.pow(r2/(_physMr*_physMr),1.8); // limb darkening
 
         // Surface color: highlands (silver-grey) vs maria (darker grey-brown)
         // nx,ny normalized to disc: x/mr, -y/mr (flip y: screen y-down → moon N-up)
@@ -2212,8 +2249,8 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
         const mare=_mariaDarkness(nx_m,ny_m);
         // Highland base: warm silver (#dde2ee), Mare base: cool dark grey (#8090a0)
         // Interpolate between mare and highland color
-        const hR=221,hG=228,hB=242; // highland silver-blue
-        const mR=100,mG=110,mB=125; // mare dark grey-blue
+        const hR=218,hG=222,hB=232; // highland warm silver
+        const mR=85,mG=90,mB=100;   // mare dark grey
         const sR=Math.round((mR+(hR-mR)*mare)*ld);
         const sG=Math.round((mG+(hG-mG)*mare)*ld);
         const sB=Math.round((mB+(hB-mB)*mare)*ld);
@@ -2256,11 +2293,11 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
   // ── Astro labels (when showLabels=true) ──────────────────────────────────
   if(showLabels && showAstro && _astroPositions.length>0){
     ctx.save();
-    ctx.font='bold 8px monospace';ctx.textBaseline='middle';
+    ctx.font='bold 8px monospace';ctx.textBaseline='middle';ctx.textAlign='left';
     const _lblItems=[];
     const _astroNames={sun:'Sun',moon:'Moon',mercury:'Mercury',venus:'Venus',mars:'Mars',jupiter:'Jupiter',saturn:'Saturn',uranus:'Uranus',neptune:'Neptune',ceres:'Ceres',pluto:'Pluto'};
     for(const obj of _astroPositions){
-      if(_astroNames[obj.name])_lblItems.push({x:obj.x,y:obj.y,r:obj.r||8,text:_astroNames[obj.name],bright:true});
+      if(_astroNames[obj.name])_lblItems.push({x:obj.x,y:obj.y,r:obj.r||8,lr:obj.lr||obj.r||8,text:_astroNames[obj.name],bright:true});
     }
     if(showSky&&!day&&!dawn&&!dusk){
       for(const [name,ra_h,dec,mag] of _STARS){
@@ -2270,20 +2307,35 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
         _lblItems.push({x:_sp.x,y:_sp.y,r:4,text:name,bright:false});
       }
     }
-    const _placed=[],_PAD=3,_LH=9;
-    for(const item of _lblItems){
-      const tw=ctx.measureText(item.text).width;
-      const _offs=[{dx:item.r+_PAD,dy:0},{dx:-tw-item.r-_PAD,dy:0},{dx:-tw/2,dy:-item.r-_LH},{dx:-tw/2,dy:item.r+_LH}];
-      let best=_offs[0],bestScore=Infinity;
-      for(const off of _offs){
-        const lx=item.x+off.dx,ly=item.y+off.dy;
-        let score=0;
-        if(lx<DX||lx+tw>DX+DW||ly<DY||ly+_LH>DY+DH)score+=100;
-        for(const p of _placed){if(Math.abs(lx-p.x)<tw+4&&Math.abs(ly-p.y)<_LH+2)score+=50;}
-        if(score<bestScore){bestScore=score;best=off;}
+    // Place all labels at their natural position first
+    const _LH=9, _VGAP=2;
+    const _placed=_lblItems.map(item=>({
+      item,
+      lx:item.x+(item.lr||item.r)+2,
+      ly:item.y
+    }));
+    // Resolve vertical collisions — adjust pairs evenly up/down
+    let changed=true;
+    for(let _pass=0;_pass<10&&changed;_pass++){
+      changed=false;
+      for(let i=0;i<_placed.length;i++){
+        for(let j=i+1;j<_placed.length;j++){
+          const a=_placed[i],b=_placed[j];
+          const overlapY=_LH+_VGAP-Math.abs(a.ly-b.ly);
+          if(overlapY<=0) continue;
+          // Only resolve if horizontally overlapping
+          const twA=ctx.measureText(a.item.text).width;
+          const twB=ctx.measureText(b.item.text).width;
+          if(a.lx+twA<b.lx-2||b.lx+twB<a.lx-2) continue;
+          // Push apart equally
+          const half=overlapY/2;
+          if(a.ly<=b.ly){a.ly-=half;b.ly+=half;}
+          else{a.ly+=half;b.ly-=half;}
+          changed=true;
+        }
       }
-      const lx=item.x+best.dx,ly=item.y+best.dy;
-      _placed.push({x:lx,y:ly});
+    }
+    for(const {item,lx,ly} of _placed){
       ctx.globalAlpha=item.bright?0.85:0.65;
       ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillText(item.text,lx+1,ly+1);
       ctx.fillStyle=item.bright?'rgba(255,240,200,0.9)':'rgba(180,210,255,0.8)';
@@ -5867,8 +5919,9 @@ const _stop = () => { _lpInertiaActive = false; _lpInteracting = false; _lpNeeds
 <div class="stl-radio" onclick="setStyle('graffiti')" data-style="graffiti" style="display:flex;align-items:center;gap:5px;padding:2px 0;cursor:pointer;font-size:9px;font-family:monospace;color:rgba(255,255,255,0.75)"><svg width="10" height="10" viewBox="0 0 13 13"><circle cx="6.5" cy="6.5" r="5.5" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.2"/><circle class="stl-dot" cx="6.5" cy="6.5" r="3" fill="rgba(255,255,255,0.85)" opacity="0"/></svg>Graffiti</div>
 </div>
 </div>
-</div>
 
+<div style="text-align:center;padding:4px 0 2px;font-size:7px;font-family:monospace;color:rgba(255,255,255,0.2)">build 20260720222927</div></div>
+<div style="text-align:center;padding:4px 0 2px;font-size:7px;font-family:monospace;color:rgba(255,255,255,0.2)">build 20260720222927</div>
 </div>
 <div id="astroPopup" style="display:none;position:fixed;z-index:100;
   background:rgba(12,18,28,0.80);border:1px solid rgba(255,255,255,0.12);
