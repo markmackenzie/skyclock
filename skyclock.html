@@ -58,9 +58,9 @@ button{cursor:pointer}
     </div>
     <!-- Info below buttons -->
     <div style="padding:6px 10px;display:flex;flex-direction:column;gap:2px">
-      <div id="locCityName" style="font-size:15px;font-weight:500;color:rgba(255,255,255,0.95);line-height:1.25"></div>
+      <div id="locCityName" style="font-size:15px;font-weight:500;color:rgba(255,255,255,0.95);vertical-align:middle;line-height:1.25"></div>
       <div style="display:flex;align-items:center;gap:4px;margin-top:2px">
-        <span id="locCityFlag" style="font-size:9px;line-height:1"></span>
+        <span id="locCityFlag" style="font-size:9px;line-height:1;display:inline-block;min-width:15px;vertical-align:middle"></span>
         <span id="locCityCountry" style="font-size:8px;color:rgba(255,255,255,0.95)"></span>
       </div>
       <div id="locCityCoord" style="font-size:7px;color:rgba(255,255,255,0.4);line-height:1.5;margin-top:2px"></div>
@@ -105,7 +105,7 @@ button{cursor:pointer}
   </div>
 </div>
 <div id="clock-sticky">
-<div style="position:absolute;bottom:2px;right:8px;font-size:8px;opacity:0.3;color:#fff;z-index:5;pointer-events:none;font-family:monospace">build 20260716121937</div><canvas id="c"></canvas>
+<div style="position:absolute;bottom:2px;right:8px;font-size:8px;opacity:0.3;color:#fff;z-index:5;pointer-events:none;font-family:monospace">build 20260720205321</div><canvas id="c"></canvas>
 </div>
 <div id="scroll-content" style="width:100%;max-width:480px;overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:10px;padding:0 12px;margin:0 auto">
 <div id="status"></div>
@@ -330,6 +330,32 @@ let ck="seattle", cs="ew", cstyle="walnut";
 let _customLoc=null;
 
 const SO={v:0};
+function _flagHtml(fl,h){
+  const fc=_flagEmojiToCode(fl||'');
+  const img=fc?_flagCache[fc]:null;
+  if(img) return '<img src="'+img.src+'" height="'+h+'" style="vertical-align:middle;margin-right:2px">';
+  return (fl||'');
+}
+function _flagEmojiToCode(emoji){
+  try{
+    const cp=[];
+    for(const ch of (emoji||'')){ const c=ch.codePointAt(0); if(c>=0x1F1E6&&c<=0x1F1FF) cp.push(c-0x1F1E6+65); }
+    return cp.length===2?String.fromCharCode(cp[0],cp[1]).toLowerCase():'';
+  }catch(e){ return ''; }
+}
+let _flagCache={}; // fc → Image object
+function _loadFlagImg(fl,cb){
+  if(location.protocol==='about:') return; // Claude sandbox — skip
+  const fc=_flagEmojiToCode(fl||'');
+  if(!fc) return;
+  if(_flagCache[fc]){ if(cb) setTimeout(()=>cb(_flagCache[fc]),0); return; }
+  const img=new Image();
+  img.crossOrigin='anonymous';
+  img.onload=()=>{ _flagCache[fc]=img; if(cb) cb(img); };
+  img.onerror=()=>{}; // silently fail
+  img.src='https://flagcdn.com/32x24/'+fc+'.png';
+}
+
 const RD=Array.from({length:40},()=>({x:Math.random(),y:Math.random(),sp:.006+Math.random()*.006}));
 const SF=Array.from({length:30},()=>({x:Math.random(),y:Math.random(),r:1+Math.random()*2,sp:.002+Math.random()*.003}));
 
@@ -1635,10 +1661,16 @@ function drawLocationGadget(ctx,DX,DY,DW,DH,loc,st,w){
   ctx.save(); ctx.shadowBlur=0;
   ctx.beginPath();ctx.moveTo(_pinTipX,_poleTopY);ctx.lineTo(_pinTipX,_pinTipY);
   ctx.strokeStyle='rgba(255,255,255,0.85)';ctx.lineWidth=1;ctx.stroke();
-  ctx.font=`${flagSz}px serif`;ctx.textBaseline='top';ctx.textAlign='left';
-  ctx.shadowColor='rgba(0,0,0,0.5)';ctx.shadowBlur=2;
-  ctx.fillText(loc.fl||'🌍',_pinTipX,_flagTopY);
-  ctx.shadowBlur=0;
+  const _fc=_flagEmojiToCode(loc.fl||'');
+  const _fi=_fc?_flagCache[_fc]:null;
+  if(_fi){
+    ctx.drawImage(_fi,_pinTipX,_flagTopY,Math.round(flagSz*1.33),flagSz);
+  } else {
+    ctx.font=`${flagSz}px serif`;ctx.textBaseline='top';ctx.textAlign='left';
+    ctx.shadowColor='rgba(0,0,0,0.5)';ctx.shadowBlur=2;
+    ctx.fillText(loc.fl||'🌍',_pinTipX,_flagTopY);
+    ctx.shadowBlur=0;
+  }
   ctx.beginPath();ctx.arc(_pinTipX,_pinTipY,1.8,0,Math.PI*2);
   ctx.fillStyle='rgba(255,255,255,0.95)';ctx.fill();
   ctx.beginPath();ctx.arc(_pinTipX,_pinTipY,1.0,0,Math.PI*2);
@@ -1887,7 +1919,7 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
         // Outer boundary: full sky rect
         ctx.rect(DX, DY, DW, DH);
         // Punch out sun disc (winding rule: evenodd means interior of disc is excluded)
-        ctx.arc(sx, sy, 18, 0, Math.PI*2);
+        ctx.arc(sx, sy, 12, 0, Math.PI*2); // match actual sun disc radius
         ctx.clip('evenodd');
         drawFn();
         ctx.restore();
@@ -2045,17 +2077,16 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
       if(Math.min(phase,1-phase) >= 1/29.53){
       // Build moon on offscreen canvas
       // Draw with explicit size so apparent radius = mr CSS px (matching sun)
-      const _dpr=window.devicePixelRatio||1;
-      const sz=Math.round((mr+4)*2*_dpr); // device pixels, tight margin
-      const _physMr=mr*_dpr; // mr in device pixels for pixel loop
+      const sz=64; // fixed offscreen canvas — drawImage uses logical coords — drawn via ctx.scale to logical mr size
+      const _physMr=32; // half of offscreen canvas size
       const oc=document.createElement("canvas");oc.width=sz;oc.height=sz;
       const ot=oc.getContext("2d"),id=ot.createImageData(sz,sz),data=id.data;
-      const _fp=window._moonFp!==false; const fp=_fp?0.8:0, dfp=_fp?3.0:0;
+      const _fp=window._moonFp!==false; const fp=_fp?2.5:0, dfp=_fp?10.0:0; // feather in offscreen canvas pixels (out of 64)
       const wax=phase<0.5;
       // Snap near-full (within ~0.3 days) to perfectly full disc — the true sliver
       // at this distance is sub-pixel and reads as a rendering artifact, not reality
       const _nearFull=Math.abs(phase-0.5)<0.04; // ~1.2 days either side — visually indistinguishable from full
-      const eR=Math.cos(phase*2*Math.PI)*mr; // terminator ellipse x-radius = full disc at quarters
+      const eR=Math.cos(phase*2*Math.PI)*_physMr; // terminator in device px = full disc at quarters
 
       // Three-layer moon rendering:
       // Layer 1: full opaque sky-coloured disc (blocks stars)
@@ -2071,16 +2102,17 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
         const x=px-sz/2, y=py-sz/2, r2=x*x+y*y;
         const ii=(py*sz+px)*4;
         if(r2>_physMr*_physMr){ data[ii+3]=0; continue; }
-        const ef=Math.min(1,(mr-Math.sqrt(r2))/1.2); // slight edge feather for limb AA
+        const ef=Math.max(0,Math.min(1,(_physMr-Math.sqrt(r2))/2.0)); // edge feather
         if(isDayMoon){
           // Day: draw sky-colored disc so moon occlude objects — barely visible dark side
           data[ii]=skyR; data[ii+1]=skyG; data[ii+2]=skyB;
           data[ii+3]=Math.round(200*ef); // slightly transparent to blend with daytime sky
         } else {
-          data[ii]=skyR;
-          data[ii+1]=skyG;
-          data[ii+2]=skyB;
-          data[ii+3]=Math.round(255*ef);
+          // Dark side: very subtle dark disc so disc boundary is visible
+          data[ii]=Math.min(255,skyR+8);
+          data[ii+1]=Math.min(255,skyG+8);
+          data[ii+2]=Math.min(255,skyB+15);
+          data[ii+3]=Math.round(180*ef);
         }
       }
       ot.putImageData(id,0,0);
@@ -2136,17 +2168,17 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
       const id2=ot2.createImageData(sz,sz); const d2=id2.data;
       for(let py=0;py<sz;py++) for(let px=0;px<sz;px++){
         const x=px-sz/2, y=py-sz/2, r2=x*x+y*y;
-        if(r2>mr*mr) continue;
+        if(r2>_physMr*_physMr) continue;
         const ii=(py*sz+px)*4;
         const ol=wax?x>=0:x<=0; // primary lit hemisphere
 
         // Terminator ellipse membership
-        const inTerm=Math.abs(eR)>0.5 ? (x*x)/(eR*eR)+(y*y)/(mr*mr)<=1 : false;
+        const inTerm=Math.abs(eR)>0.5 ? (x*x)/(eR*eR)+(y*y)/(_physMr*_physMr)<=1 : false;
 
         let lit;
         if(_nearFull){
           lit=true;
-        } else if(Math.abs(eR)<0.5){
+        } else if(Math.abs(eR)<1.0){
           lit=ol;
         } else if(eR>0){
           lit=ol&&!inTerm;
@@ -2156,12 +2188,12 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
         if(!lit) continue;
 
         const limbFp=1.0;
-        const limbDist=mr-Math.sqrt(r2);
+        const limbDist=_physMr-Math.sqrt(r2);
         const limbAlpha=limbDist<limbFp ? limbDist/limbFp : 1.0;
 
         let termAlpha=1.0;
         if(_fp && !_nearFull && Math.abs(eR)>0.5){
-          const ev=Math.sqrt((x*x)/(eR*eR)+(y*y)/(mr*mr));
+          const ev=Math.sqrt((x*x)/(eR*eR)+(y*y)/(_physMr*_physMr));
           if(eR>0){
             const termDist=(ev-1)*Math.abs(eR);
             if(termDist < fp) termAlpha=termDist/fp;
@@ -2172,11 +2204,11 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
         }
 
         const finalAlpha=Math.round(255*limbAlpha*termAlpha);
-        const ld=1-0.45*Math.pow(r2/(mr*mr),1.5); // limb darkening
+        const ld=1-0.45*Math.pow(r2/(_physMr*_physMr),1.5); // limb darkening
 
         // Surface color: highlands (silver-grey) vs maria (darker grey-brown)
         // nx,ny normalized to disc: x/mr, -y/mr (flip y: screen y-down → moon N-up)
-        const nx_m=x/mr, ny_m=-y/mr; // ny_m>0 = north = up on screen
+        const nx_m=x/_physMr, ny_m=-y/_physMr; // normalized to disc
         const mare=_mariaDarkness(nx_m,ny_m);
         // Highland base: warm silver (#dde2ee), Mare base: cool dark grey (#8090a0)
         // Interpolate between mare and highland color
@@ -2196,7 +2228,7 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
         ot.beginPath();ot.arc(sz/2,sz/2,_physMr-0.5,0,Math.PI*2);ot.clip();
         ot.strokeStyle='rgba(80,90,110,0.5)';ot.lineWidth=1.2;
         const _tS=wax?-Math.PI/2:Math.PI/2,_tE=wax?Math.PI/2:Math.PI*3/2;
-        ot.beginPath();ot.ellipse(sz/2,sz/2,Math.abs(eR),mr,0,_tS,_tE);ot.stroke();
+        ot.beginPath();ot.ellipse(sz/2,sz/2,Math.abs(eR),_physMr,0,_tS,_tE);ot.stroke();
         ot.restore();
       }
 
@@ -2211,7 +2243,7 @@ function drawSky(ctx,DX,DY,DW,DH,loc,w,st){
       const _waxAdj = phase < 0.5 ? 0 : Math.PI;
       ctx.rotate(tiltAngle + _waxAdj);
       ctx.globalAlpha=_astroAlpha;
-      ctx.drawImage(oc,-mr,-mr,mr*2,mr*2); // draw at mr CSS px radius
+      ctx.drawImage(oc,-mr,-mr,mr*2,mr*2); // logical px — scales with zoom and DPR automatically
       ctx.restore();
       ctx.globalAlpha=_astroAlpha;
     }}
@@ -3449,7 +3481,7 @@ function toggleStatusPanel(){
 }
 function getLoc(){return _customLoc||LM[ck];}
 
-function pickLoc(k){ck=k;_customLoc=null;_skyCache=null;_lastAstroMs=0;_astroData={};_globeCache=null;_globeCacheKey='';_sunCache={};maybeRefreshWeather(LM[k]);renderLocs();updateStatus();drawFrame();}
+function pickLoc(k){ck=k;_customLoc=null;_loadFlagImg(getLoc().fl,()=>{drawFrame();updateStatus();});_skyCache=null;_lastAstroMs=0;_astroData={};_globeCache=null;_globeCacheKey='';_sunCache={};maybeRefreshWeather(LM[k]);renderLocs();updateStatus();drawFrame();}
 
 function pickLocWC(city){
   try{
@@ -3468,7 +3500,7 @@ function pickLocWC(city){
   for(const c of L){const d=Math.hypot(c.lat-(city.lat||0),c.lon-(city.lon||0));if(d<bestD){bestD=d;bestK=c.k;}}
   ck=bestK;_skyCache=null;_lastAstroMs=0;_astroData={};_globeCache=null;_globeCacheKey='';_sunCache={};
   if(LM[bestK]) maybeRefreshWeather(LM[bestK]);
-  renderLocs();updateStatus();drawFrame();
+  renderLocs();updateStatus();drawFrame();_loadFlagImg(getLoc().fl,()=>{drawFrame();updateStatus();});
   }catch(e){console.error('pickLocWC error:',e.message,e.stack);}
 }
 function moonPhaseName(phase){
@@ -4579,7 +4611,7 @@ function updateStatus(){
   document.getElementById("status").innerHTML=`
   <table style="font-size:11px;color:rgba(255,255,255,0.55);font-family:monospace;border-collapse:collapse;width:100%;table-layout:fixed">
 
-    ${hd(loc.fl+" "+loc.n+(loc.c?", "+loc.c:""),"")}
+    ${hd(_flagHtml(loc.fl,11)+" "+loc.n+(loc.c?", "+loc.c:""),"")}
     ${row("Time",`<span id='st-time'>${localTime}</span>`,"UTC offset",offLabel)}
     ${row("Timezone",tzName,"Lat/long",Math.abs(loc.lat).toFixed(1)+"°"+(loc.lat>=0?"N":"S")+" "+Math.abs(loc.lon).toFixed(1)+"°"+(loc.lon>=0?"E":"W"))}
 
@@ -5250,7 +5282,7 @@ function _lpDraw() {
       ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.lineWidth=0.8; ctx.stroke();
       ctx.beginPath(); ctx.arc(cx2,cy2,1.5,0,Math.PI*2);
       ctx.fillStyle='rgba(210,30,30,0.95)'; ctx.fill();
-      if(!_lpInteracting){
+      if(!_lpInteracting && (!_locTappedCity || loc.n !== _locTappedCity.n)){
         ctx.font='500 9px Oswald,sans-serif';
         ctx.fillStyle='rgba(255,255,255,0.9)';
         ctx.textBaseline='middle';
@@ -5612,6 +5644,11 @@ const _CC={
 '🇵🇫':'French Polynesia','🇹🇴':'Tonga','🇼🇸':'Samoa','🇦🇸':'American Samoa'
 };
 function _updateLocPanel(city) {
+  // Pre-load flag; when ready just update the flag element only
+  _loadFlagImg(city.fl||'', ()=>{
+    const _fle=document.getElementById('locCityFlag');
+    if(_fle){ const _fh=_flagHtml(city.fl,10); if(_fh!==city.fl) _fle.innerHTML=_fh; else _fle.textContent=city.fl||''; }
+  });
   const fl = document.getElementById('locCityFlag');
   const nm = document.getElementById('locCityName');
   const co = document.getElementById('locCityCountry');
@@ -5623,7 +5660,7 @@ function _updateLocPanel(city) {
   if(!city) return;
   if(nm) nm.textContent = city.n||city.k||'';
   // Flag + country on same line
-  if(fl) fl.textContent = city.fl||'';
+  if(fl){ const _fh=_flagHtml(city.fl,10); if(_fh!==city.fl) fl.innerHTML=_fh; else fl.textContent=city.fl||''; }
   if(co){
     const flag=city.fl||'';
     co.textContent=(flag&&_CC[flag])||city.c||'';
@@ -5783,7 +5820,7 @@ function _initLocPopupListeners(){
 
 // Fire first tick at next whole second
 setTimeout(tickTime, 1000-new Date().getMilliseconds());
-document.fonts.ready.then(()=>{setupCanvas();_initLocPopupListeners();drawFrame();});
+document.fonts.ready.then(()=>{setupCanvas();_initLocPopupListeners();drawFrame();_loadFlagImg(getLoc().fl,()=>{drawFrame();updateStatus();});});
 
 const _stop = () => { _lpInertiaActive = false; _lpInteracting = false; _lpNeedsDraw = true; }
 </script>
